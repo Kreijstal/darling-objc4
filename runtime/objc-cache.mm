@@ -376,7 +376,6 @@ void bucket_t::set(bucket_t *base, SEL newSel, IMP newImp, Class cls)
 void cache_t::initializeToEmpty()
 {
     _bucketsAndMaybeMask.store((uintptr_t)&_objc_empty_cache, std::memory_order_relaxed);
-    _occupied = 0;
     _originalPreoptCache.store(nullptr, std::memory_order_relaxed);
 }
 
@@ -693,18 +692,7 @@ bucket_t *cache_t::allocateBuckets(mask_t newCapacity)
 {
     if (PrintCaches) recordNewCache(newCapacity);
 
-    size_t bytes = bytesForCapacity(newCapacity);
-    bucket_t *buckets = (bucket_t *)calloc(bytes, 1);
-#if defined(DARLING)
-    // Cache scans require every unused selector slot to be exactly zero.
-    // Cached libmalloc can recycle large calloc regions without clearing
-    // their former cache entries under Darling's VM compatibility layer.
-    volatile uintptr_t *words = (volatile uintptr_t *)buckets;
-    for (size_t i = 0; i < bytes / sizeof(*words); i++) {
-        words[i] = 0;
-    }
-#endif
-    return buckets;
+    return (bucket_t *)calloc(bytesForCapacity(newCapacity), 1);
 }
 
 #endif
@@ -760,12 +748,6 @@ bucket_t *cache_t::emptyBucketsForCapacity(mask_t capacity, bool allocate)
 
 bool cache_t::isConstantEmptyCache() const
 {
-#if defined(DARLING)
-    // Authoritative-cache classes can retain the cache's old occupancy while
-    // their buckets are redirected to this runtime's immutable empty sentinel.
-    // The sentinel can never contain entries and must never be freed.
-    if (buckets() == emptyBuckets()) return true;
-#endif
     return
         occupied() == 0  &&
         buckets() == emptyBucketsForCapacity(capacity(), false);
@@ -908,27 +890,7 @@ void cache_t::insert(SEL sel, IMP imp, id receiver)
         }
     } while (fastpath((i = cache_next(i, m)) != begin));
 
-    // DARLING: Fallback rather than fatal bad_cache abort. If MAX_CACHE_SIZE is reached,
-    // silently returning prevents crashing, though subsequent dispatches will do a full method lookup.
-    capacity = capacity ? capacity * 2 : INIT_CACHE_SIZE;
-    if (capacity <= MAX_CACHE_SIZE) {
-        reallocate(oldCapacity, capacity, true);
-        b = buckets();
-        m = capacity - 1;
-        begin = cache_hash(sel, m);
-        i = begin;
-        do {
-            if (fastpath(b[i].sel() == 0)) {
-                incrementOccupied();
-                b[i].set<Atomic, Encoded>(b, sel, imp, cls());
-                return;
-            }
-            if (b[i].sel() == sel) {
-                return;
-            }
-        } while (fastpath((i = cache_next(i, m)) != begin));
-    }
-    return;
+    bad_cache(receiver, (SEL)sel);
 #endif // !DEBUG_TASK_THREADS
 }
 
@@ -994,10 +956,6 @@ void cache_t::eraseNolock(const char *func)
         c->setDisallowPreoptCaches();
     } else if (occupied() > 0) {
         auto capacity = this->capacity();
-        if (capacity == 0) {
-            setBucketsAndMask(emptyBuckets(), 0);
-            return;
-        }
         auto oldBuckets = buckets();
         auto buckets = emptyBucketsForCapacity(capacity);
 

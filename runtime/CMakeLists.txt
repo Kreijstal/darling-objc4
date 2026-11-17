@@ -23,13 +23,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -nostdinc -nostdinc++ -O2 -std=gnu++14 -
 			-fno-rtti -fno-exceptions -Wno-c++11-narrowing -fvisibility-inlines-hidden -Wno-invalid-offsetof -Wno-deprecated-objc-isa-usage \
 			-Wno-cast-of-sel-type -Wstrict-aliasing=2 -Wstrict-overflow=4 -fstrict-aliasing -fno-delete-null-pointer-checks")
 
-# OBJC_IS_DEBUG_BUILD must match objc-config.h's DEBUG (which is !NDEBUG).
-# Release/RelWithDebInfo/MinSizeRel inject -DNDEBUG -> DEBUG=0 -> need =0.
-# Debug and empty build types do not -> DEBUG=1 -> need =1.
-add_compile_definitions(
-	OBJC_NO_GC
-	$<IF:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>,OBJC_IS_DEBUG_BUILD=0,OBJC_IS_DEBUG_BUILD=1>
-)
+add_definitions(-DOBJC_NO_GC)
 add_definitions(-DTARGET_OS_IPHONE=0 -DOS_OBJECT_USE_OBJC=0 -D_LIBCPP_VISIBLE="")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
